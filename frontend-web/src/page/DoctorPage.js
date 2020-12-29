@@ -1,9 +1,11 @@
 import React, { Component } from 'react';
 import Grid from '@material-ui/core/Grid/index'
-import { Layout, Menu, Button, Row, Table } from "antd";
+import {Layout, Menu, Button, Row, Table, Modal, Input, Select} from "antd";
 import { Link } from "react-router-dom";
+import axios from "axios";
 
 const { Content, Sider } = Layout;
+const { Option } = Select;
 
 const columns_admission = [
     {
@@ -24,20 +26,135 @@ const columns_admission = [
     },
 ];
 
-const data_admission = [
-    {
-        key: '1',
-        number: '1',
-        name: 'John Brown',
-        admission: 'not checked',
-        check: <Button>check</Button>,
-    },
-];
+let pid = 0;
+let appointment_url = "http://202.120.40.8:30611/Entity/Udbdc8b322a1243/hosp/Appointment/";
+let medicine_url = "http://202.120.40.8:30611/Entity/Udbdc8b322a1243/hosp/Medicine/";
+let prescription_url = "http://202.120.40.8:30611/Entity/Udbdc8b322a1243/hosp/Prescription/";
 
 class DoctorPage extends Component {
-    // eslint-disable-next-line no-useless-constructor
     constructor(props){
         super(props);
+        this.state = {
+            data_admission: [],
+        }
+        this.getAppointment = this.getAppointment.bind(this)
+        this.handleCheckTextChange = this.handleCheckTextChange.bind(this)
+        this.handleModalOk = this.handleModalOk.bind(this)
+        this.showModal = this.showModal.bind(this)
+        this.handlePrescChange = this.handlePrescChange.bind(this)
+    }
+
+    getAppointment() {
+        axios.get(appointment_url).then(res => {
+                if (res.data != null && res.data['Appointment'] !== undefined) {
+                    let data = res.data['Appointment'].map((item, index) => {
+                        return {
+                            key: index,
+                            number: item['aid'],
+                            name: item['patientname'],
+                            admission: item['completion'] ? 'checked' : 'not checked',
+                            check:
+                                <Button disabled={item['completion']} onClick={() => this.showModal(item['aid'])}>
+                                    checklist
+                                </Button>,
+                        };
+                    })
+                    this.setState({data_admission: data})
+                }
+            })
+    }
+
+    componentWillMount() {
+        this.getAppointment()
+    }
+
+    handleCheckTextChange(id, event) {
+        axios.get(appointment_url + "?Appointment.aid=" + id)
+            .then(res => {
+                let params = res.data['Appointment'][0]
+                params['content'] = event.target.value
+                axios.put(appointment_url + params['id'], params, {
+                    headers: {
+                        'Content-Type': 'application/json;charset=UTF-8'
+                    },
+                })
+            })
+    }
+
+    handlePrescChange(id, value) {
+        let params = {}
+        let mid = value
+        axios.get(medicine_url + "?Medicine.mid=" + mid)
+            .then(res => {
+                params['mname'] = res.data['Medicine'][0]['name']
+                params['mprice'] = res.data['Medicine'][0]['price']
+                axios.get(prescription_url + "?Prescription.aid=" + id)
+                    .then(res => {
+                        let put_params = res.data['Prescription'][0]
+                        console.log(put_params)
+                        put_params['mid'] = parseInt(mid)
+                        put_params['mname'] = params['mname']
+                        put_params['mprice'] = params['mprice']
+                        axios.put(prescription_url + put_params['id'], put_params, {
+                            headers: {
+                                'Content-Type': 'application/json;charset=UTF-8'
+                            }
+                        })
+                    })
+            })
+    }
+
+    handleModalOk(id) {
+        // finish checking and prescribing
+        axios.get(appointment_url + "?Appointment.aid=" + id)
+            .then(res => {
+                let params = res.data['Appointment'][0]
+                params['completion'] = 1
+                axios.put(appointment_url + params['id'], params, {headers: {'Content-Type': 'application/json;charset=UTF-8'},})
+                    .then(() => {this.getAppointment()})
+            })
+    }
+
+    showModal(id) {
+        // create a new prescription for this admission id
+        let params = {
+            // "pid": pid,
+            "aid": id,
+            // "patientid": 1,
+            "mid": 0,
+            "payed": 0,
+            "prescribed": 0,
+        }
+        pid += 1
+        axios.get(medicine_url + "?Medicine.mid=" + params['mid'])
+            .then(res => {
+                console.log(res.data)
+                console.log(res.data['Medicine'][0])
+                params['mname'] = res.data['Medicine'][0]['name']
+                params['mprice'] = res.data['Medicine'][0]['price']
+                console.log(params)
+                axios.post(prescription_url, params).then(() => {
+                    // show modal and wait for doctor checking and prescribing
+                    Modal.info({
+                        title: 'Checklist',
+                        content:
+                            <>
+                                <Input placeholder="Enter check result"
+                                       onChange={(event) => this.handleCheckTextChange(id, event)}
+                                />
+                                {/*<Input placeholder="Enter prescription"*/}
+                                {/*       onChange={(event) => this.handlePrescTextChange(id, event)}*/}
+                                {/*/>,*/}
+                                <Select defaultValue="0" onChange={(value) => this.handlePrescChange(id, value)}>
+                                    <Option value="0">Aspirin</Option>
+                                    <Option value="1">Astragalus</Option>
+                                    <Option value="2">Codonopsis</Option>
+                                </Select>
+                            </>,
+                        onOk: () => this.handleModalOk(id),
+                    })
+                })
+            })
     }
 
     render() {
@@ -63,7 +180,7 @@ class DoctorPage extends Component {
                                     <Grid item xs={8} >
                                         <br/><br/>
                                         <h1>Admission Information</h1>
-                                        <Table columns={columns_admission} dataSource={data_admission} />
+                                        <Table columns={columns_admission} dataSource={this.state.data_admission} />
                                     </Grid>
                                     <Grid item xs={2} />
                                 </Grid>
